@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ARC PredictX — Deploy Contract</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Outfit:wght@400;600;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#050810;color:#e8edf5;font-family:'Outfit',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .wrap{max-width:520px;width:100%;padding:32px 20px}
+  .hdr{text-align:center;margin-bottom:32px}
+  .hdr h1{font-family:'JetBrains Mono',monospace;font-size:24px;margin-bottom:6px}
+  .hdr p{color:#4a5568;font-size:13px}
+  .card{background:rgba(12,16,26,.92);border:1px solid rgba(99,102,241,.08);border-radius:14px;padding:28px;margin-bottom:14px;backdrop-filter:blur(20px)}
+  .btn{width:100%;padding:16px;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;border:none;border-radius:12px;font-family:'Outfit';font-size:15px;font-weight:700;cursor:pointer;transition:all .25s}
+  .btn:hover:not(:disabled){box-shadow:0 4px 28px rgba(99,102,241,.3);transform:translateY(-2px)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .prog{width:100%;height:6px;background:rgba(99,102,241,.08);border-radius:3px;overflow:hidden;margin:16px 0}
+  .prog-bar{height:100%;background:linear-gradient(90deg,#6366f1,#818cf8);border-radius:3px;transition:width .3s;width:0%}
+  .status{font-family:'JetBrains Mono',monospace;font-size:12px;color:#4a5568;text-align:center;min-height:20px;margin-top:8px}
+  .result{margin-top:16px;padding:16px;background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.12);border-radius:10px;display:none}
+  .result.show{display:block}
+  .result-lbl{font-size:10px;color:#10b981;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px}
+  .result-addr{font-family:'JetBrains Mono',monospace;font-size:13px;color:#10b981;word-break:break-all;cursor:pointer;padding:8px;background:rgba(16,185,129,.06);border-radius:6px}
+  .result-addr:hover{background:rgba(16,185,129,.1)}
+  .copied{font-size:11px;color:#10b981;text-align:center;margin-top:6px;opacity:0;transition:opacity .3s}
+  .copied.show{opacity:1}
+  .link{display:block;text-align:center;margin-top:10px;color:#818cf8;font-size:12px;text-decoration:none;font-family:'JetBrains Mono',monospace}
+  .link:hover{text-decoration:underline}
+  .ftr{text-align:center;color:#4a5568;font-size:10px;font-family:'JetBrains Mono',monospace;margin-top:24px;opacity:.4;letter-spacing:1px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <h1>◈ PredictX Deployer</h1>
+    <p>One-click deploy on Arc Testnet</p>
+  </div>
+  <div class="card">
+    <button class="btn" id="deployBtn" onclick="deploy()">Deploy ARCPredictX Contract</button>
+    <div class="prog"><div class="prog-bar" id="bar"></div></div>
+    <div class="status" id="status"></div>
+    <div class="result" id="result">
+      <div class="result-lbl">Contract Deployed</div>
+      <div class="result-addr" id="addr" onclick="copyAddr()"></div>
+      <div class="copied" id="copied">Copied!</div>
+      <a class="link" id="explorer" href="#" target="_blank">View on ArcScan →</a>
+    </div>
+  </div>
+  <div class="ftr">ARC PREDICTX · DEPLOYER</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script>
+const ARC = {
+  chainId:"0x4CEF52",chainName:"Arc Network Testnet",
+  rpcUrls:["https://rpc.testnet.arc.network"],
+  nativeCurrency:{name:"USDC",symbol:"USDC",decimals:18},
+  blockExplorerUrls:["https://testnet.arcscan.app"]
+};
+
+const CONTRACT_SOURCE = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+contract ARCPredictX {
+    struct Market {
+        uint256 id;
+        string question;
+        uint256 endTime;
+        uint256 totalYesAmount;
+        uint256 totalNoAmount;
+        bool resolved;
+        bool outcome;
+    }
+    address public admin;
+    uint256 public marketCount;
+    mapping(uint256 => Market) public markets;
+    mapping(uint256 => mapping(address => uint256)) public yesBets;
+    mapping(uint256 => mapping(address => uint256)) public noBets;
+    mapping(uint256 => mapping(address => bool)) public claimed;
+    event MarketCreated(uint256 indexed id, string question, uint256 endTime);
+    event BetPlaced(uint256 indexed id, address indexed user, bool isYes, uint256 amount);
+    event MarketResolved(uint256 indexed id, bool outcome);
+    event RewardClaimed(uint256 indexed id, address indexed user, uint256 reward);
+    error OnlyAdmin();
+    error EndTimeInPast();
+    error MarketExpired();
+    error MarketNotExpired();
+    error MarketAlreadyResolved();
+    error MarketNotResolved();
+    error ZeroBet();
+    error NotWinner();
+    error AlreadyClaimed();
+    error TransferFailed();
+    error InvalidMarket();
+    modifier onlyAdmin() { if (msg.sender != admin) revert OnlyAdmin(); _; }
+    constructor() { admin = msg.sender; }
+    function createMarket(string memory question, uint256 endTime) external onlyAdmin {
+        if (endTime <= block.timestamp) revert EndTimeInPast();
+        uint256 id = marketCount;
+        markets[id] = Market({ id: id, question: question, endTime: endTime, totalYesAmount: 0, totalNoAmount: 0, resolved: false, outcome: false });
+        marketCount++;
+        emit MarketCreated(id, question, endTime);
+    }
+    function resolveMarket(uint256 marketId, bool outcome) external onlyAdmin {
+        if (marketId >= marketCount) revert InvalidMarket();
+        Market storage m = markets[marketId];
+        if (block.timestamp < m.endTime) revert MarketNotExpired();
+        if (m.resolved) revert MarketAlreadyResolved();
+        m.resolved = true;
+        m.outcome = outcome;
+        emit MarketResolved(marketId, outcome);
+    }
+    function buyYes(uint256 marketId) external payable {
+        if (marketId >= marketCount) revert InvalidMarket();
+        Market storage m = markets[marketId];
+        if (block.timestamp >= m.endTime) revert MarketExpired();
+        if (msg.value == 0) revert ZeroBet();
+        yesBets[marketId][msg.sender] += msg.value;
+        m.totalYesAmount += msg.value;
+        emit BetPlaced(marketId, msg.sender, true, msg.value);
+    }
+    function buyNo(uint256 marketId) external payable {
+        if (marketId >= marketCount) revert InvalidMarket();
+        Market storage m = markets[marketId];
+        if (block.timestamp >= m.endTime) revert MarketExpired();
+        if (msg.value == 0) revert ZeroBet();
+        noBets[marketId][msg.sender] += msg.value;
+        m.totalNoAmount += msg.value;
+        emit BetPlaced(marketId, msg.sender, false, msg.value);
+    }
+    function claimReward(uint256 marketId) external {
+        if (marketId >= marketCount) revert InvalidMarket();
+        Market storage m = markets[marketId];
+        if (!m.resolved) revert MarketNotResolved();
+        if (claimed[marketId][msg.sender]) revert AlreadyClaimed();
+        uint256 totalPool = m.totalYesAmount + m.totalNoAmount;
+        uint256 reward;
+        if (m.outcome) {
+            uint256 userBet = yesBets[marketId][msg.sender];
+            if (userBet == 0) revert NotWinner();
+            reward = (userBet * totalPool) / m.totalYesAmount;
+        } else {
+            uint256 userBet = noBets[marketId][msg.sender];
+            if (userBet == 0) revert NotWinner();
+            reward = (userBet * totalPool) / m.totalNoAmount;
+        }
+        claimed[marketId][msg.sender] = true;
+        (bool ok, ) = payable(msg.sender).call{value: reward}("");
+        if (!ok) revert TransferFailed();
+        emit RewardClaimed(marketId, msg.sender, reward);
+    }
+    function getMarket(uint256 marketId) external view returns (uint256 id, string memory question, uint256 endTime, uint256 totalYesAmount, uint256 totalNoAmount, bool resolved, bool outcome) {
+        Market storage m = markets[marketId];
+        return (m.id, m.question, m.endTime, m.totalYesAmount, m.totalNoAmount, m.resolved, m.outcome);
+    }
+    function getUserBets(uint256 marketId, address user) external view returns (uint256 yesBet, uint256 noBet, bool hasClaimed) {
+        return (yesBets[marketId][user], noBets[marketId][user], claimed[marketId][user]);
+    }
+    function getClaimable(uint256 marketId, address user) external view returns (uint256) {
+        Market storage m = markets[marketId];
+        if (!m.resolved || claimed[marketId][user]) return 0;
+        uint256 totalPool = m.totalYesAmount + m.totalNoAmount;
+        if (totalPool == 0) return 0;
+        if (m.outcome) { uint256 b = yesBets[marketId][user]; if (b == 0 || m.totalYesAmount == 0) return 0; return (b * totalPool) / m.totalYesAmount; }
+        else { uint256 b = noBets[marketId][user]; if (b == 0 || m.totalNoAmount == 0) return 0; return (b * totalPool) / m.totalNoAmount; }
+    }
+}`;
+
+const $ = id => document.getElementById(id);
+const setBar = p => $("bar").style.width = p+"%";
+const setStatus = t => $("status").textContent = t;
+
+async function deploy() {
+  const btn = $("deployBtn");
+  btn.disabled = true;
+  try {
+    // 1. Connect MetaMask
+    setStatus("Connecting wallet…"); setBar(5);
+    if (!window.ethereum) throw new Error("Install MetaMask");
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+
+    // 2. Switch to Arc Testnet
+    setStatus("Switching to Arc Testnet…"); setBar(10);
+    try {
+      await window.ethereum.request({ method:"wallet_switchEthereumChain", params:[{chainId:ARC.chainId}] });
+    } catch(e) {
+      if (e.code === 4902 || e.code === -32603)
+        await window.ethereum.request({ method:"wallet_addEthereumChain", params:[ARC] });
+    }
+
+    // 3. Compile in Web Worker
+    setStatus("Loading Solidity compiler (~6 MB)…"); setBar(15);
+    const workerCode = `
+      self.onmessage = function(e) {
+        try {
+          importScripts("https://binaries.soliditylang.org/bin/soljson-v0.8.20+commit.a1b79de6.js");
+          self.postMessage({type:"loaded"});
+          var compile = Module.cwrap("solidity_compile","string",["string","number","number"]);
+          var input = JSON.stringify({
+            language:"Solidity",
+            sources:{"ARCPredictX.sol":{content:e.data}},
+            settings:{optimizer:{enabled:true,runs:200},outputSelection:{"*":{"*":["abi","evm.bytecode.object"]}}}
+          });
+          var out = compile(input, 0, 0);
+          self.postMessage({type:"compiled",data:out});
+        } catch(err) { self.postMessage({type:"error",data:err.message}); }
+      };`;
+    const blob = new Blob([workerCode], {type:"text/javascript"});
+    const worker = new Worker(URL.createObjectURL(blob));
+
+    const result = await new Promise((resolve, reject) => {
+      worker.onmessage = function(e) {
+        if (e.data.type === "loaded") { setStatus("Compiling contract…"); setBar(50); }
+        else if (e.data.type === "compiled") resolve(e.data.data);
+        else if (e.data.type === "error") reject(new Error(e.data.data));
+      };
+      worker.onerror = (e) => reject(new Error(e.message));
+      worker.postMessage(CONTRACT_SOURCE);
+    });
+    worker.terminate();
+
+    const output = JSON.parse(result);
+    if (output.errors) {
+      const errs = output.errors.filter(e=>e.severity==="error");
+      if (errs.length) throw new Error(errs[0].formattedMessage);
+    }
+    const compiled = output.contracts["ARCPredictX.sol"]["ARCPredictX"];
+    const abi = compiled.abi;
+    const bytecode = "0x" + compiled.evm.bytecode.object;
+    setStatus("Compiled! Deploying…"); setBar(70);
+
+    // 4. Deploy
+    const factory = new ethers.ContractFactory(abi, bytecode, signer);
+    const contract = await factory.deploy();
+    setStatus("Waiting for confirmation…"); setBar(85);
+    await contract.waitForDeployment();
+    const addr = await contract.getAddress();
+
+    // 5. Done!
+    setBar(100); setStatus("✅ Deployed successfully!");
+    $("addr").textContent = addr;
+    $("explorer").href = ARC.blockExplorerUrls[0] + "/address/" + addr;
+    $("result").classList.add("show");
+  } catch(e) {
+    setStatus("❌ " + (e.reason || e.message));
+    setBar(0);
+  } finally { btn.disabled = false; }
+}
+
+function copyAddr() {
+  navigator.clipboard.writeText($("addr").textContent);
+  $("copied").classList.add("show");
+  setTimeout(() => $("copied").classList.remove("show"), 2000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "address": "0xYOUR_DEPLOYED_CONTRACT_ADDRESS",
+  "abi": [
+    "constructor()",
+    "function admin() view returns (address)",
+    "function marketCount() view returns (uint256)",
+    "function createMarket(string question, uint256 endTime)",
+    "function resolveMarket(uint256 marketId, bool outcome)",
+    "function buyYes(uint256 marketId) payable",
+    "function buyNo(uint256 marketId) payable",
+    "function claimReward(uint256 marketId)",
+    "function getMarket(uint256 marketId) view returns (uint256 id, string question, uint256 endTime, uint256 totalYesAmount, uint256 totalNoAmount, bool resolved, bool outcome)",
+    "function getUserBets(uint256 marketId, address user) view returns (uint256 yesBet, uint256 noBet, bool hasClaimed)",
+    "function getClaimable(uint256 marketId, address user) view returns (uint256)",
+    "function markets(uint256) view returns (uint256 id, string question, uint256 endTime, uint256 totalYesAmount, uint256 totalNoAmount, bool resolved, bool outcome)",
+    "function yesBets(uint256, address) view returns (uint256)",
+    "function noBets(uint256, address) view returns (uint256)",
+    "function claimed(uint256, address) view returns (bool)",
+    "event MarketCreated(uint256 indexed id, string question, uint256 endTime)",
+    "event BetPlaced(uint256 indexed id, address indexed user, bool isYes, uint256 amount)",
+    "event MarketResolved(uint256 indexed id, bool outcome)",
+    "event RewardClaimed(uint256 indexed id, address indexed user, uint256 reward)"
+  ]
+}
